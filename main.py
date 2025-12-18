@@ -1,7 +1,6 @@
 # -------------------------------
 # Import required libraries
 # -------------------------------
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 import pandas as pd
@@ -11,7 +10,6 @@ import os
 # -------------------------------
 # Initialize FastAPI application
 # -------------------------------
-
 app = FastAPI(title="Local Excel IVR API")
 
 EXCEL_FILE = "IVR_Agentic_POC_Sample_Data.xlsx"
@@ -19,7 +17,6 @@ EXCEL_FILE = "IVR_Agentic_POC_Sample_Data.xlsx"
 # -------------------------------
 # Column order (used if Excel is missing)
 # -------------------------------
-
 COLUMNS = [
     "Call_ID",
     "Customer_Name",
@@ -36,7 +33,6 @@ COLUMNS = [
 # =========================================================
 # DATA MODELS
 # =========================================================
-
 class CallRecord(BaseModel):
     """Full record used for POST and PUT"""
     Call_ID: int
@@ -61,28 +57,40 @@ class CallUpdate(BaseModel):
 # =========================================================
 # UTILITY FUNCTIONS
 # =========================================================
+# Optional: caching mechanism to speed up reads
+_last_modified_time = 0
+_cached_df = None
 
 def read_excel_df() -> pd.DataFrame:
-    """
-    Reads Excel into DataFrame.
-    Creates empty Excel if missing.
-    """
+    """Reads Excel into DataFrame. Creates Excel if missing."""
+    global _last_modified_time, _cached_df
+
+    # If file missing, create empty Excel
     if not os.path.exists(EXCEL_FILE):
         df = pd.DataFrame(columns=COLUMNS)
         df.to_excel(EXCEL_FILE, index=False)
+        _cached_df = df
+        _last_modified_time = os.path.getmtime(EXCEL_FILE)
         return df
 
-    return pd.read_excel(EXCEL_FILE)
+    # Check file modified time to reload
+    modified_time = os.path.getmtime(EXCEL_FILE)
+    if _cached_df is None or modified_time != _last_modified_time:
+        _cached_df = pd.read_excel(EXCEL_FILE)
+        _last_modified_time = modified_time
 
+    return _cached_df.copy()  # Return copy to avoid in-memory edits
 
 def write_excel_df(df: pd.DataFrame):
-    """Writes DataFrame back to Excel"""
+    """Writes DataFrame back to Excel and updates cache"""
     df.to_excel(EXCEL_FILE, index=False)
+    global _cached_df, _last_modified_time
+    _cached_df = df
+    _last_modified_time = os.path.getmtime(EXCEL_FILE)
 
 # =========================================================
 # READ ALL
 # =========================================================
-
 @app.get("/calls")
 def get_all_calls():
     """Fetch all call records"""
@@ -92,26 +100,21 @@ def get_all_calls():
 # =========================================================
 # READ BY ID
 # =========================================================
-
 @app.get("/calls/{call_id}")
 def get_call_by_id(call_id: int):
     """Fetch call record by Call_ID"""
     df = read_excel_df()
-
     if call_id not in df["Call_ID"].values:
         raise HTTPException(status_code=404, detail="Call_ID not found")
-
     return df[df["Call_ID"] == call_id].iloc[0].to_dict()
 
 # =========================================================
 # CREATE (NO DUPLICATES)
 # =========================================================
-
 @app.post("/calls")
 def create_call(record: CallRecord):
     """Create a new call record (unique Call_ID)"""
     df = read_excel_df()
-
     if record.Call_ID in df["Call_ID"].values:
         raise HTTPException(
             status_code=400,
@@ -120,19 +123,14 @@ def create_call(record: CallRecord):
 
     df = pd.concat([df, pd.DataFrame([record.dict()])], ignore_index=True)
     write_excel_df(df)
-
     return {"message": "Call record created", "Call_ID": record.Call_ID}
 
 # =========================================================
 # UPSERT (PUT)
 # =========================================================
-
 @app.put("/calls/{call_id}")
 def upsert_call(call_id: int, record: CallRecord):
-    """
-    Replace existing record or insert new one.
-    Ensures URL Call_ID and body Call_ID match.
-    """
+    """Replace existing record or insert new one"""
     if call_id != record.Call_ID:
         raise HTTPException(
             status_code=400,
@@ -140,24 +138,18 @@ def upsert_call(call_id: int, record: CallRecord):
         )
 
     df = read_excel_df()
-
-    # Remove old record if exists
-    df = df[df["Call_ID"] != call_id]
-
+    df = df[df["Call_ID"] != call_id]  # Remove existing if present
     df = pd.concat([df, pd.DataFrame([record.dict()])], ignore_index=True)
     write_excel_df(df)
-
     return {"message": "Call record upserted", "Call_ID": call_id}
 
 # =========================================================
 # PARTIAL UPDATE (PATCH)
 # =========================================================
-
 @app.patch("/calls/{call_id}")
 def update_call(call_id: int, update: CallUpdate):
     """Update selected fields of a call record"""
     df = read_excel_df()
-
     if call_id not in df["Call_ID"].values:
         raise HTTPException(status_code=404, detail="Call_ID not found")
 
@@ -165,22 +157,18 @@ def update_call(call_id: int, update: CallUpdate):
         df.loc[df["Call_ID"] == call_id, field] = value
 
     write_excel_df(df)
-
     return {"message": f"Call_ID {call_id} updated successfully"}
 
 # =========================================================
 # DELETE
 # =========================================================
-
 @app.delete("/calls/{call_id}")
 def delete_call(call_id: int):
     """Delete a call record"""
     df = read_excel_df()
-
     if call_id not in df["Call_ID"].values:
         raise HTTPException(status_code=404, detail="Call_ID not found")
 
     df = df[df["Call_ID"] != call_id]
     write_excel_df(df)
-
     return {"message": f"Call_ID {call_id} deleted"}
