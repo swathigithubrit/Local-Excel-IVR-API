@@ -5,7 +5,7 @@ It simulates an IVR call log system where each call has a unique Call_ID and mul
 
 ✅ The entire system runs locally — no cloud, no server required.
 
-Key Features:
+Key Features
 
 CRUD operations on Excel data:
 
@@ -21,11 +21,12 @@ Duplicate prevention for Call_ID
 
 Validation of Confidence_Score (0–1) and mandatory fields
 
-Handles missing Excel file by creating it automatically
+Automatic handling of missing Excel file (creates it if not present)
 
-Swagger UI available for testing: http://127.0.0.1:8000/docs
+Interactive Swagger UI available for testing: http://127.0.0.1:8000/docs
 
 Fully offline — Excel remains local, API runs on your machine
+
 
 🔹 Project Structure
 Excel_API_Project/
